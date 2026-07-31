@@ -1948,6 +1948,161 @@ pub fn purge() -> anyhow::Result<()> {
     Ok(())
 }
 
+pub fn doctor() -> anyhow::Result<()> {
+    // --- Configuration ---
+    println!("Configuration");
+    let config = rbw::config::Config::load();
+    let config = match config {
+        Ok(c) => {
+            if let Some(ref email) = c.email {
+                println!("  \u{2713} Email:       {email}");
+            } else {
+                println!("  \u{2717} Email:       (not configured)");
+            }
+            println!("  \u{2713} Server:      {}", c.base_url());
+            Some(c)
+        }
+        Err(_) => {
+            println!("  \u{2717} Config:      not found");
+            None
+        }
+    };
+
+    // --- Server ---
+    println!();
+    println!("Server");
+    if let Some(ref config) = config {
+        let client = rbw::api::Client::new(
+            &config.base_url(),
+            &config.identity_url(),
+            &config.ui_url(),
+            config.client_cert_path(),
+        );
+
+        match client.server_config() {
+            Ok(sc) => {
+                let name = sc.server_name().unwrap_or("unknown");
+                let version =
+                    sc.version.as_deref().unwrap_or("unknown");
+                println!("  \u{2713} Reachable");
+                println!("  \u{2713} Type:        {name} {version}");
+            }
+            Err(_) => {
+                println!("  \u{2717} Reachable:   no");
+            }
+        }
+
+        if let Some(ref email) = config.email {
+            match client.prelogin_blocking(email) {
+                Ok((kdf, iterations, memory, parallelism)) => {
+                    let kdf_str = match kdf {
+                        rbw::api::KdfType::Pbkdf2 => {
+                            format!("PBKDF2 (iter: {iterations})")
+                        }
+                        rbw::api::KdfType::Argon2id => {
+                            let mem = memory.unwrap_or(0);
+                            let par = parallelism.unwrap_or(0);
+                            format!(
+                                "Argon2id (mem: {mem}MB, \
+                                 iter: {iterations}, par: {par})"
+                            )
+                        }
+                    };
+                    println!("  \u{2713} KDF:         {kdf_str}");
+                }
+                Err(_) => {
+                    println!("  \u{2717} KDF:         (prelogin failed)");
+                }
+            }
+        }
+    } else {
+        println!("  \u{2717} (skipped — no config)");
+    }
+
+    // --- Agent ---
+    println!();
+    println!("Agent");
+    match crate::sock::Sock::connect() {
+        Ok(mut sock) => {
+            let req = rbw::protocol::Request::new(
+                rbw::protocol::Environment::new(None, vec![]),
+                rbw::protocol::Action::CheckLock,
+            );
+            if sock.send(&req).is_err() {
+                println!("  \u{2713} Running (lock state unknown)");
+            } else {
+                match sock.recv() {
+                    Ok(rbw::protocol::Response::Ack) => {
+                        println!("  \u{2713} Running (unlocked)");
+                    }
+                    Ok(rbw::protocol::Response::Error { error }) => {
+                        println!(
+                            "  \u{2713} Running (locked: {error})"
+                        );
+                    }
+                    Ok(_) | Err(_) => {
+                        println!("  \u{2713} Running (lock state unknown)");
+                    }
+                }
+            }
+        }
+        Err(_) => {
+            println!("  \u{2717} Not running");
+        }
+    }
+
+    // --- Vault ---
+    println!();
+    println!("Vault");
+    if let Some(ref config) = config {
+        if let Some(ref email) = config.email {
+            let server = config.server_name();
+            let db_path = rbw::dirs::db_file(&server, email);
+            match rbw::db::Db::load(&server, email) {
+                Ok(db) => {
+                    let entries = db.entries.len();
+                    println!("  \u{2713} Entries:     {entries}");
+
+                    if let Ok(metadata) = std::fs::metadata(&db_path) {
+                        if let Ok(modified) = metadata.modified() {
+                            let elapsed = modified
+                                .elapsed()
+                                .unwrap_or_default();
+                            let secs = elapsed.as_secs();
+                            let age = if secs < 60 {
+                                format!("{secs}s ago")
+                            } else if secs < 3600 {
+                                format!("{}m ago", secs / 60)
+                            } else if secs < 86400 {
+                                format!("{}h ago", secs / 3600)
+                            } else {
+                                format!("{}d ago", secs / 86400)
+                            };
+                            println!("  \u{2713} Last sync:   {age}");
+                        }
+                    }
+
+                    let mfa = if db.two_factor_token.is_some() {
+                        "cached"
+                    } else {
+                        "none"
+                    };
+                    println!("  \u{2713} MFA token:   {mfa}");
+                }
+                Err(_) => {
+                    println!("  \u{2717} Not yet synced");
+                }
+            }
+        } else {
+            println!("  \u{2717} (skipped — no email configured)");
+        }
+    } else {
+        println!("  \u{2717} (skipped — no config)");
+    }
+
+    Ok(())
+}
+
 pub fn stop_agent() -> anyhow::Result<()> {
     crate::actions::quit()?;
 
