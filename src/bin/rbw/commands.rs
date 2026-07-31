@@ -1507,8 +1507,7 @@ pub fn search(
         .filter(|entry| {
             entry
                 .as_ref()
-                .map(|entry| entry.search_match(term, folder))
-                .unwrap_or(true)
+                .map_or(true, |entry| entry.search_match(term, folder))
         })
         .map(|entry| entry.map(std::convert::Into::into))
         .collect::<Result<_, anyhow::Error>>()?;
@@ -1948,24 +1947,21 @@ pub fn purge() -> anyhow::Result<()> {
     Ok(())
 }
 
-pub fn doctor() -> anyhow::Result<()> {
+pub fn doctor() {
     // --- Configuration ---
     println!("Configuration");
     let config = rbw::config::Config::load();
-    let config = match config {
-        Ok(c) => {
-            if let Some(ref email) = c.email {
-                println!("  \u{2713} Email:       {email}");
-            } else {
-                println!("  \u{2717} Email:       (not configured)");
-            }
-            println!("  \u{2713} Server:      {}", c.base_url());
-            Some(c)
+    let config = if let Ok(c) = config {
+        if let Some(ref email) = c.email {
+            println!("  \u{2713} Email:       {email}");
+        } else {
+            println!("  \u{2717} Email:       (not configured)");
         }
-        Err(_) => {
-            println!("  \u{2717} Config:      not found");
-            None
-        }
+        println!("  \u{2713} Server:      {}", c.base_url());
+        Some(c)
+    } else {
+        println!("  \u{2717} Config:      not found");
+        None
     };
 
     // --- Server ---
@@ -2100,7 +2096,6 @@ pub fn doctor() -> anyhow::Result<()> {
         println!("  \u{2717} (skipped — no config)");
     }
 
-    Ok(())
 }
 
 pub fn stop_agent() -> anyhow::Result<()> {

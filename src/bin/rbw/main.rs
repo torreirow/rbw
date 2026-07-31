@@ -457,7 +457,10 @@ fn main() {
         Opt::Lock => commands::lock(),
         Opt::Purge => commands::purge(),
         Opt::StopAgent => commands::stop_agent(),
-        Opt::Doctor => commands::doctor(),
+        Opt::Doctor => {
+            commands::doctor();
+            Ok(())
+        }
         Opt::GenCompletions { shell } => {
             match shell {
                 CompletionShell::Bash => {
