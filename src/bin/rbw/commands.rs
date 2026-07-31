@@ -1978,8 +1978,7 @@ pub fn doctor() {
         match client.server_config() {
             Ok(sc) => {
                 let name = sc.server_name().unwrap_or("unknown");
-                let version =
-                    sc.version.as_deref().unwrap_or("unknown");
+                let version = sc.version.as_deref().unwrap_or("unknown");
                 println!("  \u{2713} Reachable");
                 println!("  \u{2713} Type:        {name} {version}");
             }
@@ -2032,9 +2031,7 @@ pub fn doctor() {
                         println!("  \u{2713} Running (unlocked)");
                     }
                     Ok(rbw::protocol::Response::Error { error }) => {
-                        println!(
-                            "  \u{2713} Running (locked: {error})"
-                        );
+                        println!("  \u{2713} Running (locked: {error})");
                     }
                     Ok(_) | Err(_) => {
                         println!("  \u{2713} Running (lock state unknown)");
@@ -2061,9 +2058,8 @@ pub fn doctor() {
 
                     if let Ok(metadata) = std::fs::metadata(&db_path) {
                         if let Ok(modified) = metadata.modified() {
-                            let elapsed = modified
-                                .elapsed()
-                                .unwrap_or_default();
+                            let elapsed =
+                                modified.elapsed().unwrap_or_default();
                             let secs = elapsed.as_secs();
                             let age = if secs < 60 {
                                 format!("{secs}s ago")
@@ -2095,7 +2091,6 @@ pub fn doctor() {
     } else {
         println!("  \u{2717} (skipped — no config)");
     }
-
 }
 
 pub fn stop_agent() -> anyhow::Result<()> {

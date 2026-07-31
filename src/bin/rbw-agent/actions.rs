@@ -149,16 +149,13 @@ pub async fn login(
                 }) => {
                     // Try the cached remember token before prompting the
                     // user for an MFA code.
-                    if let Some(remember_token) =
-                        db.two_factor_token.clone()
+                    if let Some(remember_token) = db.two_factor_token.clone()
                     {
                         match rbw::actions::login(
                             &email,
                             password.clone(),
                             Some(&remember_token),
-                            Some(
-                                rbw::api::TwoFactorProviderType::Remember,
-                            ),
+                            Some(rbw::api::TwoFactorProviderType::Remember),
                         )
                         .await
                         {
@@ -189,9 +186,9 @@ pub async fn login(
                                 .await?;
                                 break 'attempts;
                             }
-                            Err(
-                                rbw::error::Error::TwoFactorRequired { .. },
-                            ) => {
+                            Err(rbw::error::Error::TwoFactorRequired {
+                                ..
+                            }) => {
                                 // Token expired — clear it and fall through
                                 // to the normal MFA prompt below.
                                 db.two_factor_token = None;
