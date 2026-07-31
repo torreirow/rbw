@@ -80,7 +80,7 @@ pub async fn login(
     state: std::sync::Arc<tokio::sync::Mutex<crate::state::State>>,
     environment: &rbw::protocol::Environment,
 ) -> anyhow::Result<()> {
-    let db = load_db().await.unwrap_or_else(|_| rbw::db::Db::new());
+    let mut db = load_db().await.unwrap_or_else(|_| rbw::db::Db::new());
 
     if db.needs_login() {
         let url_str = config_base_url().await?;
@@ -124,6 +124,7 @@ pub async fn login(
                     memory,
                     parallelism,
                     protected_key,
+                    mfa_remember_token,
                 )) => {
                     login_success(
                         state.clone(),
@@ -135,6 +136,7 @@ pub async fn login(
                         parallelism,
                         protected_key,
                         password,
+                        mfa_remember_token,
                         db,
                         email,
                     )
@@ -145,6 +147,63 @@ pub async fn login(
                     providers,
                     sso_email_2fa_session_token,
                 }) => {
+                    // Try the cached remember token before prompting the
+                    // user for an MFA code.
+                    if let Some(remember_token) =
+                        db.two_factor_token.clone()
+                    {
+                        match rbw::actions::login(
+                            &email,
+                            password.clone(),
+                            Some(&remember_token),
+                            Some(
+                                rbw::api::TwoFactorProviderType::Remember,
+                            ),
+                        )
+                        .await
+                        {
+                            Ok((
+                                access_token,
+                                refresh_token,
+                                kdf,
+                                iterations,
+                                memory,
+                                parallelism,
+                                protected_key,
+                                new_remember_token,
+                            )) => {
+                                login_success(
+                                    state.clone(),
+                                    access_token,
+                                    refresh_token,
+                                    kdf,
+                                    iterations,
+                                    memory,
+                                    parallelism,
+                                    protected_key,
+                                    password,
+                                    new_remember_token,
+                                    db,
+                                    email,
+                                )
+                                .await?;
+                                break 'attempts;
+                            }
+                            Err(
+                                rbw::error::Error::TwoFactorRequired { .. },
+                            ) => {
+                                // Token expired — clear it and fall through
+                                // to the normal MFA prompt below.
+                                db.two_factor_token = None;
+                            }
+                            Err(e) => {
+                                return Err(e).context(
+                                    "failed to log in to bitwarden instance",
+                                )
+                            }
+                        }
+                    }
+
                     let supported_types = vec![
                         rbw::api::TwoFactorProviderType::Authenticator,
                         rbw::api::TwoFactorProviderType::Yubikey,
@@ -174,6 +233,7 @@ pub async fn login(
                                 memory,
                                 parallelism,
                                 protected_key,
+                                mfa_remember_token,
                             ) = two_factor(
                                 environment,
                                 &email,
@@ -191,6 +251,7 @@ pub async fn login(
                                 parallelism,
                                 protected_key,
                                 password,
+                                mfa_remember_token,
                                 db,
                                 email,
                             )
@@ -237,6 +298,7 @@ async fn two_factor(
     Option<u32>,
     Option<u32>,
     String,
+    Option<String>,
 )> {
     let mut err_msg = None;
     for i in 1_u8..=3 {
@@ -275,6 +337,7 @@ async fn two_factor(
                 memory,
                 parallelism,
                 protected_key,
+                mfa_remember_token,
             )) => {
                 return Ok((
                     access_token,
@@ -284,6 +347,7 @@ async fn two_factor(
                     memory,
                     parallelism,
                     protected_key,
+                    mfa_remember_token,
                 ))
             }
             Err(rbw::error::Error::IncorrectPassword { message }) => {
@@ -326,11 +390,13 @@ async fn login_success(
     parallelism: Option<u32>,
     protected_key: String,
     password: rbw::locked::Password,
+    mfa_remember_token: Option<String>,
     mut db: rbw::db::Db,
     email: String,
 ) -> anyhow::Result<()> {
     db.access_token = Some(access_token.clone());
     db.refresh_token = Some(refresh_token.clone());
+    db.two_factor_token = mfa_remember_token;
     db.kdf = Some(kdf);
     db.iterations = Some(iterations);
     db.memory = memory;

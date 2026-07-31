@@ -302,6 +302,8 @@ struct ConnectTokenReq {
     two_factor_token: Option<String>,
     #[serde(rename = "twoFactorProvider")]
     two_factor_provider: Option<u32>,
+    #[serde(rename = "twoFactorRemember")]
+    two_factor_remember: bool,
     #[serde(flatten)]
     auth: ConnectTokenAuth,
 }
@@ -339,6 +341,8 @@ struct ConnectTokenRes {
     refresh_token: String,
     #[serde(rename = "Key", alias = "key")]
     key: String,
+    #[serde(rename = "TwoFactorToken", default)]
+    two_factor_token: Option<String>,
 }
 
 #[derive(serde::Deserialize, Debug)]
@@ -809,6 +813,32 @@ struct FoldersPostReq {
     name: String,
 }
 
+#[derive(serde::Deserialize, Debug)]
+struct ServerConfigServer {
+    #[serde(default)]
+    name: Option<String>,
+    #[serde(default)]
+    url: Option<String>,
+}
+
+#[derive(serde::Deserialize, Debug)]
+pub struct ServerConfig {
+    #[serde(default)]
+    pub version: Option<String>,
+    #[serde(default)]
+    server: Option<ServerConfigServer>,
+}
+
+impl ServerConfig {
+    pub fn server_name(&self) -> Option<&str> {
+        self.server.as_ref()?.name.as_deref()
+    }
+
+    pub fn server_url(&self) -> Option<&str> {
+        self.server.as_ref()?.url.as_deref()
+    }
+}
+
 // Used for the Bitwarden-Client-Name header. Accepted values:
 // https://github.com/bitwarden/server/blob/main/src/Core/Enums/BitwardenClient.cs
 const BITWARDEN_CLIENT: &str = "cli";
@@ -916,6 +946,28 @@ impl Client {
         ))
     }
 
+    pub fn prelogin_blocking(
+        &self,
+        email: &str,
+    ) -> Result<(KdfType, u32, Option<u32>, Option<u32>)> {
+        let prelogin = PreloginReq {
+            email: email.to_string(),
+        };
+        let client = reqwest::blocking::Client::new();
+        let res = client
+            .post(self.identity_url("/accounts/prelogin"))
+            .json(&prelogin)
+            .send()
+            .map_err(|source| Error::Reqwest { source })?;
+        let prelogin_res: PreloginRes = res.json_with_path()?;
+        Ok((
+            prelogin_res.kdf,
+            prelogin_res.kdf_iterations,
+            prelogin_res.kdf_memory,
+            prelogin_res.kdf_parallelism,
+        ))
+    }
+
     pub async fn register(
         &self,
         email: &str,
@@ -943,6 +995,7 @@ impl Client {
             device_push_token: String::new(),
             two_factor_token: None,
             two_factor_provider: None,
+            two_factor_remember: false,
         };
         let client = self.reqwest_client().await?;
         let res = client
@@ -979,7 +1032,7 @@ impl Client {
         password_hash: &crate::locked::PasswordHash,
         two_factor_token: Option<&str>,
         two_factor_provider: Option<TwoFactorProviderType>,
-    ) -> Result<(String, String, String)> {
+    ) -> Result<(String, String, String, Option<String>)> {
         let connect_req = match sso_id {
             Some(sso_id) => {
                 let (sso_code, sso_code_verifier, callback_url) =
@@ -1002,6 +1055,7 @@ impl Client {
                         .map(std::string::ToString::to_string),
                     two_factor_provider: two_factor_provider
                         .map(|ty| ty as u32),
+                    two_factor_remember: two_factor_token.is_some(),
                 }
             }
             None => ConnectTokenReq {
@@ -1020,6 +1074,7 @@ impl Client {
                 two_factor_token: two_factor_token
                     .map(std::string::ToString::to_string),
                 two_factor_provider: two_factor_provider.map(|ty| ty as u32),
+                two_factor_remember: two_factor_token.is_some(),
             },
         };
 
@@ -1041,6 +1096,7 @@ impl Client {
                 connect_res.access_token,
                 connect_res.refresh_token,
                 connect_res.key,
+                connect_res.two_factor_token,
             ))
         } else {
             let code = res.status().as_u16();
@@ -1540,6 +1596,16 @@ impl Client {
                 status: res.status().as_u16(),
             }),
         }
+    }
+
+    pub fn server_config(&self) -> Result<ServerConfig> {
+        let client = reqwest::blocking::Client::new();
+        let res = client
+            .get(self.api_url("/config"))
+            .send()
+            .map_err(|source| Error::Reqwest { source })?;
+        let config: ServerConfig = res.json_with_path()?;
+        Ok(config)
     }
 
     pub fn exchange_refresh_token(
