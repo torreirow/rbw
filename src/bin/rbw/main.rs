@@ -237,6 +237,11 @@ enum Opt {
         about = "Generate completion script for the given shell"
     )]
     GenCompletions { shell: CompletionShell },
+
+    #[command(
+        about = "Check configuration, server connectivity, and vault state"
+    )]
+    Doctor,
 }
 
 impl Opt {
@@ -263,6 +268,7 @@ impl Opt {
             Self::Purge => "purge".to_string(),
             Self::StopAgent => "stop-agent".to_string(),
             Self::GenCompletions { .. } => "gen-completions".to_string(),
+            Self::Doctor => "doctor".to_string(),
         }
     }
 }
@@ -451,6 +457,7 @@ fn main() {
         Opt::Lock => commands::lock(),
         Opt::Purge => commands::purge(),
         Opt::StopAgent => commands::stop_agent(),
+        Opt::Doctor => commands::doctor(),
         Opt::GenCompletions { shell } => {
             match shell {
                 CompletionShell::Bash => {

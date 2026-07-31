@@ -26,6 +26,7 @@ pub async fn login(
     Option<u32>,
     Option<u32>,
     String,
+    Option<String>,
 )> {
     let (client, config) = api_client_async().await?;
     let (kdf, iterations, memory, parallelism) =
@@ -39,16 +40,17 @@ pub async fn login(
         memory,
         parallelism,
     )?;
-    let (access_token, refresh_token, protected_key) = client
-        .login(
-            email,
-            config.sso_id.as_deref(),
-            &crate::config::device_id(&config).await?,
-            &identity.master_password_hash,
-            two_factor_token,
-            two_factor_provider,
-        )
-        .await?;
+    let (access_token, refresh_token, protected_key, mfa_remember_token) =
+        client
+            .login(
+                email,
+                config.sso_id.as_deref(),
+                &crate::config::device_id(&config).await?,
+                &identity.master_password_hash,
+                two_factor_token,
+                two_factor_provider,
+            )
+            .await?;
 
     Ok((
         access_token,
@@ -58,6 +60,7 @@ pub async fn login(
         memory,
         parallelism,
         protected_key,
+        mfa_remember_token,
     ))
 }
 

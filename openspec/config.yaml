@@ -1,0 +1,117 @@
+schema: spec-driven
+
+context: |
+  ## Project: rbw — Unofficial Bitwarden CLI
+
+  rbw is an unofficial Bitwarden CLI written in Rust. It solves the statelessness
+  problem of the official Bitwarden CLI by maintaining a background agent process
+  that holds decryption keys in memory (similar to ssh-agent/gpg-agent). This lets
+  users interact with their vault without manually locking/unlocking or passing keys
+  in environment variables.
+
+  ## Architecture
+
+  Two binary crates in one package:
+
+  1. **`rbw`** — CLI client (sync entry point)
+     - `src/bin/rbw/main.rs`: clap-based CLI with all subcommands
+     - `src/bin/rbw/commands.rs`: command implementations (thin wrappers over actions)
+     - `src/bin/rbw/actions.rs`: sends IPC requests to the agent
+     - `src/bin/rbw/sock.rs`: Unix socket client
+
+  2. **`rbw-agent`** — Background daemon (async Tokio event loop)
+     - `src/bin/rbw-agent/agent.rs`: main event loop (UnixListener + timers + notifications)
+     - `src/bin/rbw-agent/actions.rs`: agent-side command implementations
+     - `src/bin/rbw-agent/state.rs`: mutable state (keys, lock status)
+     - `src/bin/rbw-agent/sock.rs`: Unix socket server
+     - `src/bin/rbw-agent/daemon.rs`: daemonization
+     - `src/bin/rbw-agent/notifications.rs`: Bitwarden WebSocket push notifications
+     - `src/bin/rbw-agent/ssh_agent.rs`: SSH agent protocol (ssh-agent-lib)
+     - `src/bin/rbw-agent/timeout.rs`: lock timeout management
+     - `src/bin/rbw-agent/debugger.rs`: ptrace/core dump protection
+
+  Shared library modules (`src/`):
+  - `api.rs`: Bitwarden REST API client (reqwest + rustls)
+  - `config.rs`: JSON config file (`~/.config/rbw/config.json`)
+  - `db.rs`: Local encrypted vault database
+  - `cipherstring.rs`: Bitwarden AES-CBC/RSA cipher string encryption/decryption
+  - `identity.rs`: Authentication (PBKDF2/argon2 key derivation, identity server)
+  - `pinentry.rs`: Pinentry protocol for password prompts
+  - `protocol.rs`: IPC protocol (Request/Response enums, Environment forwarding)
+  - `pwgen.rs`: Password generation (AllChars, NoSymbols, Numbers, NonConfusables, Diceware)
+  - `dirs.rs`: XDG directory handling
+  - `locked.rs`: Memory-locked secret buffers (zeroize)
+  - `error.rs`: Error types (thiserror)
+
+  ## IPC Protocol
+
+  Unix domain socket at `$XDG_RUNTIME_DIR/rbw/socket` (or `rbw-<profile>/socket`).
+  JSON-encoded messages. Requests carry an `Environment` struct that forwards
+  display/Wayland/D-Bus env vars to the agent for pinentry.
+
+  Actions: Login, Register, Unlock, CheckLock, Lock, Sync, Decrypt, Encrypt,
+  ClipboardStore, Quit, Version
+
+  Responses: Ack, Error, Decrypt, Encrypt, Version
+
+  ## Tech Stack
+
+  - Language: Rust 2021 edition, MSRV 1.82.0
+  - Async runtime: Tokio (full features)
+  - CLI: clap v4 with derive API
+  - HTTP: reqwest (blocking in CLI, async in agent) with rustls-tls-native-roots
+  - Serialization: serde + serde_json
+  - Error handling: anyhow (propagation) + thiserror (error types)
+  - Crypto: aes, cbc, rsa, hkdf, pbkdf2, argon2, sha1, sha2, hmac, pkcs8
+  - TOTP: totp-rs (with steam feature)
+  - Clipboard: arboard with wayland-data-control (optional feature "clipboard")
+  - SSH agent: ssh-agent-lib
+  - Memory security: zeroize, region (mlock), rustix
+  - IPC transport: Tokio UnixListener/UnixStream + rmpv (msgpack for SSH agent)
+  - Logging: env_logger
+  - Terminal: terminal_size, textwrap, is-terminal
+
+  ## Conventions
+
+  - Heavy Clippy: pedantic + nursery + cargo lints enabled, with specific allows
+  - rustfmt configured via `.rustfmt.toml`
+  - `anyhow::Context` used extensively for error context chaining
+  - `crate::prelude::*` imported in most modules (re-exports Result, Error)
+  - No tests in the repository (upstream decision)
+  - Security: ptrace protection, core dump disabling, memory locking
+  - Profile support via `RBW_PROFILE` env var (separate config/db/socket per profile)
+
+  ## Build & Distribution
+
+  - Build target: `x86_64-unknown-linux-musl` (static binary)
+  - Build tool: `make` (wraps cargo commands)
+  - Packaging: `cargo-deb` for Debian `.deb`, tarball for GitHub releases
+  - Signing: minisign for Debian packages
+  - Published to: crates.io, Arch extra, Debian testing, Fedora/EPEL, Homebrew, Nix, Alpine
+  - Release process: `make publish` → crates.io + git tags + deb to remote host + GitHub release
+
+  ## Key Domain Concepts
+
+  - **Vault entry types**: Login (username/password/TOTP/URIs/custom fields), SSH Key, Identity, Card, Note
+  - **Cipher strings**: Bitwarden's format for encrypted data, supports AES-CBC and RSA
+  - **Organization keys**: Entries can belong to organizations with their own RSA-encrypted keys
+  - **Master Password Reprompt**: Some entries require re-entering master password before showing
+  - **SSO**: Optional SSO login flow via `sso_id` config
+  - **Device registration**: Required for official bitwarden.com (bot detection bypass)
+
+rules:
+  proposal:
+    - Keep proposals under 400 words
+    - Always include a "Non-goals" section
+    - Proposals must mention impact on both rbw and rbw-agent if IPC is touched
+  design:
+    - Include data flow diagrams for any new IPC actions or API calls
+    - Call out any memory safety implications (zeroize, mlock) for crypto changes
+    - Note Clippy lint implications for new public APIs
+  tasks:
+    - Break tasks into single-file or single-function chunks where possible
+    - Always include a "build check" task (cargo check / cargo clippy) after implementation tasks
+    - If touching protocol.rs, note that both binaries must be updated atomically
+  spec:
+    - Reference the relevant Bitwarden API docs or vault format specs when known
+    - Call out backward compatibility concerns (config format, DB format, socket protocol)

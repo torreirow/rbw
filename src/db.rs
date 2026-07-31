@@ -179,6 +179,8 @@ pub struct HistoryEntry {
 pub struct Db {
     pub access_token: Option<String>,
     pub refresh_token: Option<String>,
+    #[serde(default)]
+    pub two_factor_token: Option<String>,
 
     pub kdf: Option<crate::api::KdfType>,
     pub iterations: Option<u32>,
