@@ -1,11 +1,11 @@
 ---
 # rbw-okfw
 title: 'Merge PR #328: fix ''rbw edit'' failure due to missing Bitwarden-Client-Version header'
-status: todo
+status: done
 type: bug
 priority: high
 created_at: 2026-07-31T09:01:50Z
-updated_at: 2026-07-31T09:01:50Z
+updated_at: 2026-07-31T11:10:59Z
 parent: rbw-k7r3
 ---
 

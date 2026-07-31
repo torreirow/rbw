@@ -1,5 +1,18 @@
 # Changelog
 
+## NEXT VERSION
+
+### Fixed
+- **Security**: Patched transitive dependencies with active RUSTSEC advisories —
+  `bytes` 1.11.0→1.12.1 (RUSTSEC-2026-0007) and `rustls-webpki` 0.103.8→0.103.13
+  (RUSTSEC-2026-0049). Cargo.lock-only update, no direct dependency changes.
+- **Agent stability**: The agent no longer silently panics when a client
+  disconnects mid-pinentry (broken pipe). Send failures are now logged as
+  warnings and the agent stays alive.
+- **`rbw edit`**: Restored functionality on recent Bitwarden/Vaultwarden servers.
+  The `Bitwarden-Client-Version` header is now set consistently across all
+  request paths via a single `BITWARDEN_CLIENT_VERSION` constant.
+
 ## [2.0.0] - 2026-07-31
 
 ### Added

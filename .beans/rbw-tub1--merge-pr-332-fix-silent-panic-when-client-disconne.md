@@ -1,11 +1,11 @@
 ---
 # rbw-tub1
 title: 'Merge PR #332: fix silent panic when client disconnects during pinentry'
-status: todo
+status: done
 type: bug
 priority: critical
 created_at: 2026-07-31T09:01:41Z
-updated_at: 2026-07-31T09:01:41Z
+updated_at: 2026-07-31T11:10:59Z
 parent: rbw-k7r3
 ---
 

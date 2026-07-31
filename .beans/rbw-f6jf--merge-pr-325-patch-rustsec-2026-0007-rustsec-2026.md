@@ -1,11 +1,11 @@
 ---
 # rbw-f6jf
 title: 'Merge PR #325: patch RUSTSEC-2026-0007 + RUSTSEC-2026-0049 (bytes + rustls-webpki)'
-status: todo
+status: done
 type: task
 priority: critical
 created_at: 2026-07-31T09:01:31Z
-updated_at: 2026-07-31T09:01:31Z
+updated_at: 2026-07-31T11:10:59Z
 parent: rbw-k7r3
 ---
 
