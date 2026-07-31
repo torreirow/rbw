@@ -1,5 +1,26 @@
 # Changelog
 
+## NEXT VERSION
+
+### Added
+- **MFA remember device**: The agent now caches a server-issued "remember this
+  device" token after each MFA login and uses it automatically on subsequent
+  logins to skip the MFA prompt (~30-day window, server-controlled). The token
+  is persisted in the local vault database and cleared on `rbw purge`.
+  - Applies to Authenticator, Yubikey, and Email MFA providers
+  - Fully backward-compatible: existing `db.json` files require no migration
+  - Vaultwarden and self-hosted servers that don't support the mechanism are
+    handled gracefully (silent fallback to normal MFA prompt)
+- **`rbw doctor`**: New diagnostic command that checks the full rbw setup
+  without requiring a running agent.
+  - Configuration: email and server URL presence
+  - Server: reachability, server name/type, and version (works with both
+    official Bitwarden and Vaultwarden)
+  - KDF: algorithm and parameters fetched via unauthenticated prelogin call
+  - Agent: running state and lock status (optional — doctor works even if the
+    agent is down)
+  - Vault: entry count, last sync time, and MFA token cache presence
+
 ## [1.15.0] - 2025-12-31
 
 ## Added
