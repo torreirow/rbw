@@ -25,13 +25,13 @@
             cargoLock.lockFile = ./Cargo.lock;
 
             nativeBuildInputs = with pkgs; [ installShellFiles ]
-              ++ pkgs.lib.optionals pkgs.stdenv.isLinux [ pkg-config ];
+              ++ pkgs.lib.optionals pkgs.stdenv.hostPlatform.isLinux [ pkg-config ];
 
             # wayland is only needed for the clipboard feature on Linux.
-            buildInputs = pkgs.lib.optionals pkgs.stdenv.isLinux [ pkgs.wayland ];
+            buildInputs = pkgs.lib.optionals pkgs.stdenv.hostPlatform.isLinux [ pkgs.wayland ];
 
             # Enable clipboard integration on Linux; macOS uses AppKit (no wayland).
-            buildFeatures = pkgs.lib.optionals pkgs.stdenv.isLinux [ "clipboard" ];
+            buildFeatures = pkgs.lib.optionals pkgs.stdenv.hostPlatform.isLinux [ "clipboard" ];
 
             postInstall = ''
               installShellCompletion --cmd rbw \
@@ -58,7 +58,7 @@
         {
           default = pkgs.mkShell {
             buildInputs = with pkgs; [ rustc cargo clippy rustfmt ]
-              ++ pkgs.lib.optionals pkgs.stdenv.isLinux [ pkg-config wayland ];
+              ++ pkgs.lib.optionals pkgs.stdenv.hostPlatform.isLinux [ pkg-config wayland ];
           };
         });
     };
