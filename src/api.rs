@@ -753,6 +753,14 @@ struct SyncResPasswordHistory {
 
 #[derive(serde::Serialize, Debug)]
 struct CiphersPostReq {
+    // the id of the user whose key the cipher was encrypted with (always a
+    // user id, even for organization ciphers). optional for the official
+    // server, but required by vaultwarden.
+    #[serde(
+        rename = "encryptedFor",
+        skip_serializing_if = "Option::is_none"
+    )]
+    encrypted_for: Option<String>,
     #[serde(rename = "type")]
     ty: u32, // XXX what are the valid types?
     #[serde(rename = "folderId")]
@@ -768,6 +776,12 @@ struct CiphersPostReq {
 
 #[derive(serde::Serialize, Debug)]
 struct CiphersPutReq {
+    // see CiphersPostReq
+    #[serde(
+        rename = "encryptedFor",
+        skip_serializing_if = "Option::is_none"
+    )]
+    encrypted_for: Option<String>,
     #[serde(rename = "type")]
     ty: u32, // XXX what are the valid types?
     #[serde(rename = "folderId")]
@@ -1260,103 +1274,8 @@ impl Client {
         notes: Option<&str>,
         folder_id: Option<&str>,
     ) -> Result<()> {
-        let mut req = CiphersPostReq {
-            ty: 1,
-            folder_id: folder_id.map(std::string::ToString::to_string),
-            name: name.to_string(),
-            notes: notes.map(std::string::ToString::to_string),
-            login: None,
-            card: None,
-            identity: None,
-            secure_note: None,
-        };
-        match data {
-            crate::db::EntryData::Login {
-                username,
-                password,
-                totp,
-                uris,
-            } => {
-                let uris = if uris.is_empty() {
-                    None
-                } else {
-                    Some(
-                        uris.iter()
-                            .map(|s| CipherLoginUri {
-                                uri: Some(s.uri.clone()),
-                                match_type: s.match_type,
-                            })
-                            .collect(),
-                    )
-                };
-                req.login = Some(CipherLogin {
-                    username: username.clone(),
-                    password: password.clone(),
-                    totp: totp.clone(),
-                    uris,
-                });
-            }
-            crate::db::EntryData::Card {
-                cardholder_name,
-                number,
-                brand,
-                exp_month,
-                exp_year,
-                code,
-            } => {
-                req.card = Some(CipherCard {
-                    cardholder_name: cardholder_name.clone(),
-                    number: number.clone(),
-                    brand: brand.clone(),
-                    exp_month: exp_month.clone(),
-                    exp_year: exp_year.clone(),
-                    code: code.clone(),
-                });
-            }
-            crate::db::EntryData::Identity {
-                title,
-                first_name,
-                middle_name,
-                last_name,
-                address1,
-                address2,
-                address3,
-                city,
-                state,
-                postal_code,
-                country,
-                phone,
-                email,
-                ssn,
-                license_number,
-                passport_number,
-                username,
-            } => {
-                req.identity = Some(CipherIdentity {
-                    title: title.clone(),
-                    first_name: first_name.clone(),
-                    middle_name: middle_name.clone(),
-                    last_name: last_name.clone(),
-                    address1: address1.clone(),
-                    address2: address2.clone(),
-                    address3: address3.clone(),
-                    city: city.clone(),
-                    state: state.clone(),
-                    postal_code: postal_code.clone(),
-                    country: country.clone(),
-                    phone: phone.clone(),
-                    email: email.clone(),
-                    ssn: ssn.clone(),
-                    license_number: license_number.clone(),
-                    passport_number: passport_number.clone(),
-                    username: username.clone(),
-                });
-            }
-            crate::db::EntryData::SecureNote => {
-                req.secure_note = Some(CipherSecureNote {});
-            }
-            crate::db::EntryData::SshKey { .. } => unreachable!(),
-        }
+        let req =
+            ciphers_post_req(access_token, name, data, notes, folder_id);
         let client = reqwest::blocking::Client::new();
         let res = client
             .post(self.api_url("/ciphers"))
@@ -1403,6 +1322,7 @@ impl Client {
             card: None,
             identity: None,
             secure_note: None,
+            encrypted_for: access_token_user_id(access_token),
             fields: fields
                 .iter()
                 .map(|field| CipherField {
@@ -1777,6 +1697,129 @@ fn sso_query_code(
     Ok(sso_code.clone())
 }
 
+fn ciphers_post_req(
+    access_token: &str,
+    name: &str,
+    data: &crate::db::EntryData,
+    notes: Option<&str>,
+    folder_id: Option<&str>,
+) -> CiphersPostReq {
+    let mut req = CiphersPostReq {
+        encrypted_for: access_token_user_id(access_token),
+        ty: 1,
+        folder_id: folder_id.map(std::string::ToString::to_string),
+        name: name.to_string(),
+        notes: notes.map(std::string::ToString::to_string),
+        login: None,
+        card: None,
+        identity: None,
+        secure_note: None,
+    };
+    match data {
+        crate::db::EntryData::Login {
+            username,
+            password,
+            totp,
+            uris,
+        } => {
+            let uris = if uris.is_empty() {
+                None
+            } else {
+                Some(
+                    uris.iter()
+                        .map(|s| CipherLoginUri {
+                            uri: Some(s.uri.clone()),
+                            match_type: s.match_type,
+                        })
+                        .collect(),
+                )
+            };
+            req.login = Some(CipherLogin {
+                username: username.clone(),
+                password: password.clone(),
+                totp: totp.clone(),
+                uris,
+            });
+        }
+        crate::db::EntryData::Card {
+            cardholder_name,
+            number,
+            brand,
+            exp_month,
+            exp_year,
+            code,
+        } => {
+            req.card = Some(CipherCard {
+                cardholder_name: cardholder_name.clone(),
+                number: number.clone(),
+                brand: brand.clone(),
+                exp_month: exp_month.clone(),
+                exp_year: exp_year.clone(),
+                code: code.clone(),
+            });
+        }
+        crate::db::EntryData::Identity {
+            title,
+            first_name,
+            middle_name,
+            last_name,
+            address1,
+            address2,
+            address3,
+            city,
+            state,
+            postal_code,
+            country,
+            phone,
+            email,
+            ssn,
+            license_number,
+            passport_number,
+            username,
+        } => {
+            req.identity = Some(CipherIdentity {
+                title: title.clone(),
+                first_name: first_name.clone(),
+                middle_name: middle_name.clone(),
+                last_name: last_name.clone(),
+                address1: address1.clone(),
+                address2: address2.clone(),
+                address3: address3.clone(),
+                city: city.clone(),
+                state: state.clone(),
+                postal_code: postal_code.clone(),
+                country: country.clone(),
+                phone: phone.clone(),
+                email: email.clone(),
+                ssn: ssn.clone(),
+                license_number: license_number.clone(),
+                passport_number: passport_number.clone(),
+                username: username.clone(),
+            });
+        }
+        crate::db::EntryData::SecureNote => {
+            req.secure_note = Some(CipherSecureNote {});
+        }
+        crate::db::EntryData::SshKey { .. } => unreachable!(),
+    }
+    req
+}
+
+// the access token is a jwt whose `sub` claim is the id of the user it was
+// issued to, which is what the server compares `encryptedFor` against. we
+// don't need to verify the signature here, since the server does that.
+fn access_token_user_id(access_token: &str) -> Option<String> {
+    #[derive(serde::Deserialize)]
+    struct Claims {
+        sub: String,
+    }
+
+    let payload = access_token.split('.').nth(1)?;
+    let payload = crate::base64::decode_url_safe_no_pad(payload).ok()?;
+    let claims: Claims = serde_json::from_slice(&payload).ok()?;
+    Some(claims.sub)
+}
+
 fn classify_login_error(error_res: &ConnectErrorRes, code: u16) -> Error {
     let error_desc = error_res.error_description.clone();
     let error_desc = error_desc.as_deref();
@@ -1835,4 +1878,196 @@ fn classify_login_error(error_res: &ConnectErrorRes, code: u16) -> Error {
 
     log::warn!("unexpected error received during login: {error_res:?}");
     Error::RequestFailed { status: code }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    const USER_ID: &str = "8b0e5ff4-6c1c-4f2c-9c8e-5b0d6c1f2a3b";
+
+    fn access_token(claims: &serde_json::Value) -> String {
+        format!(
+            "{}.{}.signature",
+            crate::base64::encode_url_safe_no_pad(
+                r#"{"alg":"RS256","typ":"JWT"}"#
+            ),
+            crate::base64::encode_url_safe_no_pad(claims.to_string()),
+        )
+    }
+
+    fn user_access_token() -> String {
+        access_token(&serde_json::json!({
+            "sub": USER_ID,
+            "email": "user@example.com",
+            "exp": 4_102_444_800_u64,
+        }))
+    }
+
+    fn login(
+        username: Option<&str>,
+        uris: Vec<crate::db::Uri>,
+    ) -> crate::db::EntryData {
+        crate::db::EntryData::Login {
+            username: username.map(std::string::ToString::to_string),
+            password: Some("2.cGFzc3dvcmQ=|aXY=|bWFj".to_string()),
+            totp: None,
+            uris,
+        }
+    }
+
+    // mirrors the subset of vaultwarden's `CipherData` request guard that
+    // matters here: `encryptedFor` is a required field there
+    #[derive(serde::Deserialize, Debug)]
+    #[serde(rename_all = "camelCase")]
+    struct VaultwardenCipherData {
+        encrypted_for: String,
+        #[serde(rename = "type")]
+        ty: u32,
+        name: String,
+        notes: Option<String>,
+        organization_id: Option<String>,
+    }
+
+    #[test]
+    fn test_access_token_user_id() {
+        assert_eq!(
+            access_token_user_id(&user_access_token()).as_deref(),
+            Some(USER_ID)
+        );
+        assert_eq!(access_token_user_id("not-a-jwt"), None);
+        assert_eq!(access_token_user_id("a.!!!.c"), None);
+        assert_eq!(
+            access_token_user_id(&access_token(
+                &serde_json::json!({ "email": "user@example.com" })
+            )),
+            None
+        );
+    }
+
+    #[test]
+    fn test_add_personal_login() {
+        let req = ciphers_post_req(
+            &user_access_token(),
+            "2.bmFtZQ==|aXY=|bWFj",
+            &login(None, vec![]),
+            None,
+            None,
+        );
+        let json = serde_json::to_value(&req).unwrap();
+        assert_eq!(json["encryptedFor"], USER_ID);
+        assert_eq!(json["type"], 1);
+        assert_eq!(json["name"], "2.bmFtZQ==|aXY=|bWFj");
+        assert!(json["notes"].is_null());
+        assert!(json["folderId"].is_null());
+        assert_eq!(json["login"]["Password"], "2.cGFzc3dvcmQ=|aXY=|bWFj");
+        assert!(json["login"]["Uris"].is_null());
+    }
+
+    #[test]
+    fn test_add_login_with_username_and_uri() {
+        let req = ciphers_post_req(
+            &user_access_token(),
+            "2.bmFtZQ==|aXY=|bWFj",
+            &login(
+                Some("2.dXNlcg==|aXY=|bWFj"),
+                vec![crate::db::Uri {
+                    uri: "2.dXJp|aXY=|bWFj".to_string(),
+                    match_type: Some(UriMatchType::Host),
+                }],
+            ),
+            None,
+            Some("folder-id"),
+        );
+        let json = serde_json::to_value(&req).unwrap();
+        assert_eq!(json["encryptedFor"], USER_ID);
+        assert_eq!(json["folderId"], "folder-id");
+        assert_eq!(json["login"]["Username"], "2.dXNlcg==|aXY=|bWFj");
+        assert_eq!(json["login"]["Uris"][0]["Uri"], "2.dXJp|aXY=|bWFj");
+        assert_eq!(json["login"]["Uris"][0]["Match"], 1);
+    }
+
+    #[test]
+    fn test_add_login_with_notes() {
+        let req = ciphers_post_req(
+            &user_access_token(),
+            "2.bmFtZQ==|aXY=|bWFj",
+            &login(None, vec![]),
+            Some("2.bm90ZXM=|aXY=|bWFj"),
+            None,
+        );
+        let json = serde_json::to_value(&req).unwrap();
+        assert_eq!(json["encryptedFor"], USER_ID);
+        assert_eq!(json["notes"], "2.bm90ZXM=|aXY=|bWFj");
+    }
+
+    // regression test: vaultwarden rejected `rbw add` with
+    // "missing field `encryptedFor`" (422)
+    #[test]
+    fn test_add_accepted_by_vaultwarden() {
+        let req = ciphers_post_req(
+            &user_access_token(),
+            "2.bmFtZQ==|aXY=|bWFj",
+            &login(None, vec![]),
+            Some("2.bm90ZXM=|aXY=|bWFj"),
+            None,
+        );
+        let body = serde_json::to_string(&req).unwrap();
+        let data: VaultwardenCipherData =
+            serde_json::from_str(&body).unwrap();
+        assert_eq!(data.encrypted_for, USER_ID);
+        assert_eq!(data.ty, 1);
+        assert_eq!(data.name, "2.bmFtZQ==|aXY=|bWFj");
+        assert_eq!(data.notes.as_deref(), Some("2.bm90ZXM=|aXY=|bWFj"));
+        assert_eq!(data.organization_id, None);
+
+        let mut old = req;
+        old.encrypted_for = None;
+        let body = serde_json::to_string(&old).unwrap();
+        let err =
+            serde_json::from_str::<VaultwardenCipherData>(&body).unwrap_err();
+        assert!(err.to_string().contains("missing field `encryptedFor`"));
+    }
+
+    // if the user id can't be determined, the request is the same as it
+    // was before `encryptedFor` existed, which the official server accepts
+    #[test]
+    fn test_add_without_user_id_omits_encrypted_for() {
+        let req = ciphers_post_req(
+            "not-a-jwt",
+            "2.bmFtZQ==|aXY=|bWFj",
+            &login(None, vec![]),
+            None,
+            None,
+        );
+        let json = serde_json::to_value(&req).unwrap();
+        assert!(json.as_object().unwrap().get("encryptedFor").is_none());
+        assert_eq!(json["type"], 1);
+        assert_eq!(json["name"], "2.bmFtZQ==|aXY=|bWFj");
+    }
+
+    // organization ciphers are encrypted with the organization key, but
+    // `encryptedFor` still identifies the user doing the encrypting
+    #[test]
+    fn test_edit_organization_cipher() {
+        let req = CiphersPutReq {
+            encrypted_for: access_token_user_id(&user_access_token()),
+            ty: 1,
+            folder_id: None,
+            organization_id: Some("org-id".to_string()),
+            name: "2.bmFtZQ==|aXY=|bWFj".to_string(),
+            notes: None,
+            login: None,
+            card: None,
+            identity: None,
+            fields: vec![],
+            secure_note: None,
+            password_history: vec![],
+        };
+        let body = serde_json::to_string(&req).unwrap();
+        let data: VaultwardenCipherData =
+            serde_json::from_str(&body).unwrap();
+        assert_eq!(data.encrypted_for, USER_ID);
+        assert_eq!(data.organization_id.as_deref(), Some("org-id"));
+    }
 }
