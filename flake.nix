@@ -15,7 +15,9 @@
           pkgs = nixpkgsFor.${system};
           version = (builtins.fromTOML (builtins.readFile ./Cargo.toml)).package.version;
         in
-        {
+        rec {
+          default = rbw;
+
           rbw = pkgs.rustPlatform.buildRustPackage {
             pname = "rbw";
             inherit version;
@@ -48,8 +50,6 @@
             };
           };
         });
-
-      defaultPackage = forAllSystems (system: self.packages.${system}.rbw);
 
       devShells = forAllSystems (system:
         let
