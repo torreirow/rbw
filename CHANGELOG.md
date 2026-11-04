@@ -1,6 +1,6 @@
 # Changelog
 
-## NEXT VERSION
+## [2.0.1] - 2026-11-04
 
 ### Fixed
 - **Security**: Patched transitive dependencies with active RUSTSEC advisories —
