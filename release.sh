@@ -18,13 +18,17 @@
 #   - Publish a GitHub Release with the archives + checksums
 #
 
-set -e
+set -eo pipefail
 
 RED=$'\033[0;31m'; GREEN=$'\033[0;32m'; YELLOW=$'\033[1;33m'; BLUE=$'\033[0;34m'; NC=$'\033[0m'
 info()    { echo -e "${BLUE}ℹ${NC} $1"; }
 success() { echo -e "${GREEN}✓${NC} $1"; }
 warn()    { echo -e "${YELLOW}⚠${NC} $1"; }
 die()     { echo -e "${RED}✗${NC} $1"; exit 1; }
+
+# Files this script may modify before the commit
+RELEASE_FILES=(Cargo.toml Cargo.lock CHANGELOG.md flake.lock)
+rollback() { git checkout -- "${RELEASE_FILES[@]}" 2>/dev/null || true; }
 
 # ── Preflight ────────────────────────────────────────────────────────────────
 
@@ -38,6 +42,9 @@ git ls-remote --exit-code origin &>/dev/null || die "Cannot reach remote."
 success "Remote reachable"
 
 [[ -f Cargo.toml ]] || die "Cargo.toml not found"
+
+command -v cargo &>/dev/null || \
+    die "cargo not found. Run inside the dev shell: nix develop -c ./release.sh"
 
 # ── Current version ──────────────────────────────────────────────────────────
 
@@ -112,7 +119,13 @@ success "Cargo.toml updated"
 # ── Build check ──────────────────────────────────────────────────────────────
 
 info "Running cargo check..."
-cargo check 2>&1 | tail -3
+# Also regenerates Cargo.lock for the new version
+if ! CHECK_OUTPUT=$(cargo check 2>&1); then
+    echo "$CHECK_OUTPUT" | tail -20
+    rollback
+    die "cargo check failed — release files rolled back"
+fi
+echo "$CHECK_OUTPUT" | tail -3
 success "Build check passed"
 
 # ── Nix flake.lock ───────────────────────────────────────────────────────────
@@ -137,6 +150,7 @@ echo "  ${CURRENT_VERSION}  →  ${GREEN}${NEW_VERSION}${NC}  (${RELEASE_NAME})"
 echo ""
 echo "  Files:"
 echo "    - Cargo.toml"
+[[ -n $(git status --porcelain Cargo.lock 2>/dev/null) ]] && echo "    - Cargo.lock"
 echo "    - CHANGELOG.md"
 [[ -n $(git status --porcelain flake.lock 2>/dev/null) ]] && echo "    - flake.lock"
 echo "════════════════════════════════════════════════════"
@@ -145,14 +159,13 @@ echo ""
 read -rp "Commit and tag? (y/n): " CONFIRM
 if [[ ! $CONFIRM =~ ^[Yy]$ ]]; then
     warn "Aborting — rolling back..."
-    git checkout Cargo.toml CHANGELOG.md
+    rollback
     exit 0
 fi
 
 # ── Commit + tag ─────────────────────────────────────────────────────────────
 
-git add Cargo.toml CHANGELOG.md
-[[ -n $(git status --porcelain flake.lock 2>/dev/null) ]] && git add flake.lock
+git add "${RELEASE_FILES[@]}"
 
 git commit -m "release: bump version to ${NEW_VERSION}"
 success "Commit created"
