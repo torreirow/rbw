@@ -1,6 +1,6 @@
 # Changelog
 
-## NEXT VERSION
+## [2.0.3] - 2026-11-04
 
 ### Fixed
 - **Clear error when the login session is rejected** (upstream #362): when the
