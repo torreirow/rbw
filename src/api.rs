@@ -798,6 +798,10 @@ struct CiphersPutReq {
     secure_note: Option<CipherSecureNote>,
     #[serde(rename = "passwordHistory")]
     password_history: Vec<CiphersPutReqHistory>,
+    // the individual item key, if the entry has one. it has to be sent back
+    // unchanged, since the server would otherwise keep a key that doesn't
+    // match the newly encrypted fields
+    key: Option<String>,
 }
 
 #[derive(serde::Serialize, Debug)]
@@ -1305,6 +1309,7 @@ impl Client {
         notes: Option<&str>,
         folder_uuid: Option<&str>,
         history: &[crate::db::HistoryEntry],
+        key: Option<&str>,
     ) -> Result<()> {
         let mut req = CiphersPutReq {
             ty: match data {
@@ -1339,6 +1344,7 @@ impl Client {
                     password: entry.password.clone(),
                 })
                 .collect(),
+            key: key.map(std::string::ToString::to_string),
         };
         match data {
             crate::db::EntryData::Login {
@@ -2063,11 +2069,36 @@ mod test {
             fields: vec![],
             secure_note: None,
             password_history: vec![],
+            key: None,
         };
         let body = serde_json::to_string(&req).unwrap();
         let data: VaultwardenCipherData =
             serde_json::from_str(&body).unwrap();
         assert_eq!(data.encrypted_for, USER_ID);
         assert_eq!(data.organization_id.as_deref(), Some("org-id"));
+    }
+
+    // regression test for doy/rbw#364: the item key has to be sent back on
+    // update, otherwise the server keeps a key the new fields don't match
+    #[test]
+    fn test_edit_preserves_item_key() {
+        let req = CiphersPutReq {
+            encrypted_for: access_token_user_id(&user_access_token()),
+            ty: 1,
+            folder_id: None,
+            organization_id: None,
+            name: "2.bmFtZQ==|aXY=|bWFj".to_string(),
+            notes: None,
+            login: None,
+            card: None,
+            identity: None,
+            fields: vec![],
+            secure_note: None,
+            password_history: vec![],
+            key: Some("2.aXRlbWtleQ==|aXY=|bWFj".to_string()),
+        };
+        let json = serde_json::to_value(&req).unwrap();
+        assert_eq!(json["key"], "2.aXRlbWtleQ==|aXY=|bWFj");
+        assert_eq!(json["encryptedFor"], USER_ID);
     }
 }

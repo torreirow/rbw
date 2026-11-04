@@ -628,18 +628,7 @@ async fn decrypt_cipher(
             "failed to find decryption keys in in-memory state"
         ));
     };
-    let entry_key = if let Some(entry_key) = entry_key {
-        let key_cipherstring =
-            rbw::cipherstring::CipherString::new(entry_key)
-                .context("failed to parse individual item encryption key")?;
-        Some(rbw::locked::Keys::new(
-            key_cipherstring.decrypt_locked_symmetric(keys).context(
-                "failed to decrypt individual item encryption key",
-            )?,
-        ))
-    } else {
-        None
-    };
+    let entry_key = entry_keys(keys, entry_key)?;
 
     let mut sha256 = sha2::Sha256::new();
     sha256.update(cipherstring);
@@ -735,6 +724,25 @@ async fn decrypt_cipher(
     Ok(plaintext)
 }
 
+fn entry_keys(
+    keys: &rbw::locked::Keys,
+    entry_key: Option<&str>,
+) -> anyhow::Result<Option<rbw::locked::Keys>> {
+    entry_key
+        .map(|entry_key| {
+            let key_cipherstring = rbw::cipherstring::CipherString::new(
+                entry_key,
+            )
+            .context("failed to parse individual item encryption key")?;
+            Ok(rbw::locked::Keys::new(
+                key_cipherstring.decrypt_locked_symmetric(keys).context(
+                    "failed to decrypt individual item encryption key",
+                )?,
+            ))
+        })
+        .transpose()
+}
+
 pub async fn decrypt(
     sock: &mut crate::sock::Sock,
     state: std::sync::Arc<tokio::sync::Mutex<crate::state::State>>,
@@ -755,6 +763,7 @@ pub async fn encrypt(
     sock: &mut crate::sock::Sock,
     state: std::sync::Arc<tokio::sync::Mutex<crate::state::State>>,
     plaintext: &str,
+    entry_key: Option<&str>,
     org_id: Option<&str>,
 ) -> anyhow::Result<()> {
     let state = state.lock().await;
@@ -763,8 +772,12 @@ pub async fn encrypt(
             "failed to find encryption keys in in-memory state"
         ));
     };
+    // entries with an individual item key must be encrypted with that key,
+    // otherwise the result can't be decrypted along with the rest of the
+    // entry
+    let entry_key = entry_keys(keys, entry_key)?;
     let cipherstring = rbw::cipherstring::CipherString::encrypt_symmetric(
-        keys,
+        entry_key.as_ref().unwrap_or(keys),
         plaintext.as_bytes(),
     )
     .context("failed to encrypt plaintext secret")?;
@@ -1012,4 +1025,61 @@ pub async fn find_ssh_private_key(
     }
 
     Err(anyhow::anyhow!("No matching private key found"))
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    fn keys(seed: u8) -> rbw::locked::Keys {
+        let mut vec = rbw::locked::Vec::new();
+        vec.extend((0_u8..64).map(|i| i.wrapping_mul(seed)));
+        rbw::locked::Keys::new(vec)
+    }
+
+    #[test]
+    fn test_entry_keys() {
+        let user_keys = keys(3);
+        let item_key_bytes: Vec<u8> = (0_u8..64).map(|i| i ^ 0x5a).collect();
+        let item_key = rbw::cipherstring::CipherString::encrypt_symmetric(
+            &user_keys,
+            &item_key_bytes,
+        )
+        .unwrap()
+        .to_string();
+
+        assert!(entry_keys(&user_keys, None).unwrap().is_none());
+        assert!(entry_keys(&user_keys, Some("not a cipherstring")).is_err());
+        assert!(entry_keys(&keys(7), Some(&item_key)).is_err());
+
+        // regression test for doy/rbw#364: a field encrypted with the item
+        // key decrypts together with the rest of the entry, a field
+        // encrypted with the user key (what rbw edit used to do) doesn't
+        let entry_keys =
+            entry_keys(&user_keys, Some(&item_key)).unwrap().unwrap();
+        assert_eq!(entry_keys.enc_key(), &item_key_bytes[..32]);
+        assert_eq!(entry_keys.mac_key(), &item_key_bytes[32..]);
+
+        let with_item_key =
+            rbw::cipherstring::CipherString::encrypt_symmetric(
+                &entry_keys,
+                b"hunter2",
+            )
+            .unwrap();
+        assert_eq!(
+            with_item_key
+                .decrypt_symmetric(&user_keys, Some(&entry_keys))
+                .unwrap(),
+            b"hunter2"
+        );
+
+        let with_user_key =
+            rbw::cipherstring::CipherString::encrypt_symmetric(
+                &user_keys, b"hunter2",
+            )
+            .unwrap();
+        assert!(with_user_key
+            .decrypt_symmetric(&user_keys, Some(&entry_keys))
+            .is_err());
+    }
 }
