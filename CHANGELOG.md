@@ -12,6 +12,11 @@
 - **`rbw edit`**: Restored functionality on recent Bitwarden/Vaultwarden servers.
   The `Bitwarden-Client-Version` header is now set consistently across all
   request paths via a single `BITWARDEN_CLIENT_VERSION` constant.
+- **`rbw add` / `rbw edit` on Vaultwarden**: Fixed `422` caused by
+  "missing field `encryptedFor`". Create and update requests now include
+  `encryptedFor`, the id of the acting user, taken from the access token's
+  `sub` claim. The field is omitted if it can't be determined, which the
+  official Bitwarden server accepts.
 
 ## [2.0.0] - 2026-07-31
 
