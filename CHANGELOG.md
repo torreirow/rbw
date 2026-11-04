@@ -12,6 +12,12 @@
 - **`rbw edit` with empty piped input** (upstream #377): when stdin is not a
   terminal and the piped contents are empty, `rbw edit` now refuses to save
   instead of silently clearing the password and notes.
+- **`rbw edit` resetting entry settings**: the update request now includes the
+  entry's master password reprompt setting, favorite flag and archive date.
+  Without them the server removed reprompt protection and unarchived the
+  entry, and the official Bitwarden server also unfavorited it. Run `rbw sync`
+  after upgrading so the favorite flag is known; until then it is left out
+  of the request.
 
 ## [2.0.1] - 2026-11-04
 

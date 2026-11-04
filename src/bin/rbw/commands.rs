@@ -1878,6 +1878,9 @@ pub fn edit(
         entry.folder_id.as_deref(),
         &history,
         entry.key.as_deref(),
+        entry.master_password_reprompt,
+        entry.favorite,
+        entry.archived_date.as_deref(),
     )? {
         db.access_token = Some(access_token);
         save_db(&db)?;
@@ -4346,6 +4349,8 @@ mod test {
                 history: vec![],
                 key: None,
                 master_password_reprompt: rbw::api::CipherRepromptType::None,
+                favorite: None,
+                archived_date: None,
             },
             DecryptedSearchCipher {
                 id: id.to_string(),

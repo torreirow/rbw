@@ -432,6 +432,10 @@ struct SyncResCipher {
     key: Option<String>,
     #[serde(rename = "Reprompt", alias = "reprompt")]
     reprompt: CipherRepromptType,
+    #[serde(rename = "Favorite", alias = "favorite", default)]
+    favorite: bool,
+    #[serde(rename = "ArchivedDate", alias = "archivedDate", default)]
+    archived_date: Option<String>,
 }
 
 impl SyncResCipher {
@@ -555,6 +559,8 @@ impl SyncResCipher {
             history,
             key: self.key.clone(),
             master_password_reprompt: self.reprompt,
+            favorite: Some(self.favorite),
+            archived_date: self.archived_date.clone(),
         })
     }
 }
@@ -802,6 +808,14 @@ struct CiphersPutReq {
     // unchanged, since the server would otherwise keep a key that doesn't
     // match the newly encrypted fields
     key: Option<String>,
+    // this is a full update, so these have to be sent back as well: the
+    // server resets reprompt and unarchives the entry when they're missing,
+    // and the official server also resets favorite
+    reprompt: CipherRepromptType,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    favorite: Option<bool>,
+    #[serde(rename = "archivedDate")]
+    archived_date: Option<String>,
 }
 
 #[derive(serde::Serialize, Debug)]
@@ -1310,6 +1324,9 @@ impl Client {
         folder_uuid: Option<&str>,
         history: &[crate::db::HistoryEntry],
         key: Option<&str>,
+        reprompt: CipherRepromptType,
+        favorite: Option<bool>,
+        archived_date: Option<&str>,
     ) -> Result<()> {
         let mut req = CiphersPutReq {
             ty: match data {
@@ -1345,6 +1362,10 @@ impl Client {
                 })
                 .collect(),
             key: key.map(std::string::ToString::to_string),
+            reprompt,
+            favorite,
+            archived_date: archived_date
+                .map(std::string::ToString::to_string),
         };
         match data {
             crate::db::EntryData::Login {
@@ -2070,6 +2091,9 @@ mod test {
             secure_note: None,
             password_history: vec![],
             key: None,
+            reprompt: CipherRepromptType::None,
+            favorite: None,
+            archived_date: None,
         };
         let body = serde_json::to_string(&req).unwrap();
         let data: VaultwardenCipherData =
@@ -2096,9 +2120,101 @@ mod test {
             secure_note: None,
             password_history: vec![],
             key: Some("2.aXRlbWtleQ==|aXY=|bWFj".to_string()),
+            reprompt: CipherRepromptType::None,
+            favorite: None,
+            archived_date: None,
         };
         let json = serde_json::to_value(&req).unwrap();
         assert_eq!(json["key"], "2.aXRlbWtleQ==|aXY=|bWFj");
         assert_eq!(json["encryptedFor"], USER_ID);
+    }
+
+    fn sync_cipher(extra: &serde_json::Value) -> SyncResCipher {
+        let mut json = serde_json::json!({
+            "id": "cipher-id",
+            "name": "2.bmFtZQ==|aXY=|bWFj",
+            "type": 1,
+            "login": { "password": "2.cGFzc3dvcmQ=|aXY=|bWFj" },
+            "reprompt": 0,
+        });
+        json.as_object_mut()
+            .unwrap()
+            .extend(extra.as_object().unwrap().clone());
+        serde_json::from_value(json).unwrap()
+    }
+
+    #[test]
+    fn test_sync_keeps_favorite_and_archived_date() {
+        let entry = sync_cipher(&serde_json::json!({
+            "reprompt": 1,
+            "favorite": true,
+            "archivedDate": "2026-10-01T12:00:00Z",
+        }))
+        .to_entry(&[])
+        .unwrap();
+        assert_eq!(
+            entry.master_password_reprompt,
+            CipherRepromptType::Password
+        );
+        assert_eq!(entry.favorite, Some(true));
+        assert_eq!(
+            entry.archived_date.as_deref(),
+            Some("2026-10-01T12:00:00Z")
+        );
+
+        // older servers may not send these at all
+        let entry =
+            sync_cipher(&serde_json::json!({})).to_entry(&[]).unwrap();
+        assert_eq!(entry.favorite, Some(false));
+        assert_eq!(entry.archived_date, None);
+    }
+
+    #[test]
+    fn test_db_entry_without_favorite_and_archived_date() {
+        let entry =
+            sync_cipher(&serde_json::json!({})).to_entry(&[]).unwrap();
+        let mut json = serde_json::to_value(&entry).unwrap();
+        let object = json.as_object_mut().unwrap();
+        object.remove("favorite");
+        object.remove("archived_date");
+        let entry: crate::db::Entry = serde_json::from_value(json).unwrap();
+        assert_eq!(entry.favorite, None);
+        assert_eq!(entry.archived_date, None);
+    }
+
+    // editing used to silently drop reprompt protection, unarchive the
+    // entry and (on the official server) unfavorite it
+    #[test]
+    fn test_edit_preserves_reprompt_favorite_and_archived_date() {
+        let mut req = CiphersPutReq {
+            encrypted_for: None,
+            ty: 1,
+            folder_id: None,
+            organization_id: None,
+            name: "2.bmFtZQ==|aXY=|bWFj".to_string(),
+            notes: None,
+            login: None,
+            card: None,
+            identity: None,
+            fields: vec![],
+            secure_note: None,
+            password_history: vec![],
+            key: None,
+            reprompt: CipherRepromptType::Password,
+            favorite: Some(true),
+            archived_date: Some("2026-10-01T12:00:00Z".to_string()),
+        };
+        let json = serde_json::to_value(&req).unwrap();
+        assert_eq!(json["reprompt"], 1);
+        assert_eq!(json["favorite"], true);
+        assert_eq!(json["archivedDate"], "2026-10-01T12:00:00Z");
+
+        // unknown favorite state (db from an older version) is left out, so
+        // vaultwarden keeps the current value
+        req.favorite = None;
+        req.archived_date = None;
+        let json = serde_json::to_value(&req).unwrap();
+        assert!(json.as_object().unwrap().get("favorite").is_none());
+        assert!(json["archivedDate"].is_null());
     }
 }

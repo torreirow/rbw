@@ -19,6 +19,12 @@ pub struct Entry {
     pub history: Vec<HistoryEntry>,
     pub key: Option<String>,
     pub master_password_reprompt: crate::api::CipherRepromptType,
+    // None for databases synced by older versions, so that we don't reset
+    // the server side value before the next sync
+    #[serde(default)]
+    pub favorite: Option<bool>,
+    #[serde(default)]
+    pub archived_date: Option<String>,
 }
 
 impl Entry {
