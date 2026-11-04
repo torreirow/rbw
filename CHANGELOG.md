@@ -1,6 +1,6 @@
 # Changelog
 
-## NEXT VERSION
+## [2.0.2] - 2026-11-04
 
 ### Fixed
 - **`rbw edit` corrupting entries with an item key** (upstream #364, based on
