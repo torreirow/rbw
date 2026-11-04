@@ -1,11 +1,11 @@
 ---
 # rbw-o4p0
 title: 'Merge PR #378: persist rotated refresh tokens'
-status: todo
+status: completed
 type: bug
 priority: normal
 created_at: 2026-11-04T20:01:59Z
-updated_at: 2026-11-04T20:01:59Z
+updated_at: 2026-11-04T20:52:17Z
 parent: rbw-4nie
 ---
 

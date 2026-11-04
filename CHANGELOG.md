@@ -1,5 +1,19 @@
 # Changelog
 
+## NEXT VERSION
+
+### Fixed
+- **Clear error when the login session is rejected** (upstream #362): when the
+  server rejects the stored refresh token (expired or revoked), commands now
+  say so and tell you to run `rbw logout` and `rbw login`, instead of failing
+  with `failed to parse JSON: missing field access_token`. A background sync
+  that hits this also clears the stored tokens, so the next command goes
+  through the normal login flow.
+- **Rotated refresh tokens are kept** (upstream #378): if the server returns a
+  new refresh token on refresh (e.g. Vaultwarden backed by an SSO identity
+  provider), it now replaces the stored one instead of being dropped, which
+  made every later refresh fail.
+
 ## [2.0.2] - 2026-11-04
 
 ### Fixed

@@ -169,6 +169,11 @@ pub enum Error {
     #[error("error waiting for pinentry to exit")]
     PinentryWait { source: tokio::io::Error },
 
+    #[error(
+        "the server rejected the stored login session (the refresh token expired or was revoked). Run `rbw logout` and then `rbw login`."
+    )]
+    RefreshTokenInvalid,
+
     #[error("This device has not yet been registered with the Bitwarden server. Run `rbw register` first, and then try again.")]
     RegistrationRequired,
 

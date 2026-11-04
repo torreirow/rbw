@@ -1567,7 +1567,7 @@ pub fn add(
     // unwrap is safe here because the call to unlock above is guaranteed to
     // populate these or error
     let mut access_token = db.access_token.as_ref().unwrap().clone();
-    let refresh_token = db.refresh_token.as_ref().unwrap();
+    let mut refresh_token = db.refresh_token.as_ref().unwrap().clone();
 
     let name = crate::actions::encrypt(name, None, None)?;
 
@@ -1596,12 +1596,15 @@ pub fn add(
 
     let mut folder_id = None;
     if let Some(folder_name) = folder {
-        let (new_access_token, folders) =
-            rbw::actions::list_folders(&access_token, refresh_token)?;
-        if let Some(new_access_token) = new_access_token {
-            access_token.clone_from(&new_access_token);
-            db.access_token = Some(new_access_token);
-            save_db(&db)?;
+        let (tokens, folders) =
+            rbw::actions::list_folders(&access_token, &refresh_token)?;
+        if let Some(tokens) = tokens {
+            store_refreshed_tokens(
+                &mut db,
+                &mut access_token,
+                &mut refresh_token,
+                tokens,
+            )?;
         }
 
         let folders: Vec<(String, String)> = folders
@@ -1618,23 +1621,26 @@ pub fn add(
             }
         }
         if folder_id.is_none() {
-            let (new_access_token, id) = rbw::actions::create_folder(
+            let (tokens, id) = rbw::actions::create_folder(
                 &access_token,
-                refresh_token,
+                &refresh_token,
                 &crate::actions::encrypt(folder_name, None, None)?,
             )?;
-            if let Some(new_access_token) = new_access_token {
-                access_token.clone_from(&new_access_token);
-                db.access_token = Some(new_access_token);
-                save_db(&db)?;
+            if let Some(tokens) = tokens {
+                store_refreshed_tokens(
+                    &mut db,
+                    &mut access_token,
+                    &mut refresh_token,
+                    tokens,
+                )?;
             }
             folder_id = Some(id);
         }
     }
 
-    if let (Some(access_token), ()) = rbw::actions::add(
+    if let (Some(tokens), ()) = rbw::actions::add(
         &access_token,
-        refresh_token,
+        &refresh_token,
         &name,
         &rbw::db::EntryData::Login {
             username,
@@ -1645,8 +1651,12 @@ pub fn add(
         notes.as_deref(),
         folder_id.as_deref(),
     )? {
-        db.access_token = Some(access_token);
-        save_db(&db)?;
+        store_refreshed_tokens(
+            &mut db,
+            &mut access_token,
+            &mut refresh_token,
+            tokens,
+        )?;
     }
 
     crate::actions::sync()?;
@@ -1672,7 +1682,7 @@ pub fn generate(
         // unwrap is safe here because the call to unlock above is guaranteed
         // to populate these or error
         let mut access_token = db.access_token.as_ref().unwrap().clone();
-        let refresh_token = db.refresh_token.as_ref().unwrap();
+        let mut refresh_token = db.refresh_token.as_ref().unwrap().clone();
 
         let name = crate::actions::encrypt(name, None, None)?;
         let username = username
@@ -1691,12 +1701,15 @@ pub fn generate(
 
         let mut folder_id = None;
         if let Some(folder_name) = folder {
-            let (new_access_token, folders) =
-                rbw::actions::list_folders(&access_token, refresh_token)?;
-            if let Some(new_access_token) = new_access_token {
-                access_token.clone_from(&new_access_token);
-                db.access_token = Some(new_access_token);
-                save_db(&db)?;
+            let (tokens, folders) =
+                rbw::actions::list_folders(&access_token, &refresh_token)?;
+            if let Some(tokens) = tokens {
+                store_refreshed_tokens(
+                    &mut db,
+                    &mut access_token,
+                    &mut refresh_token,
+                    tokens,
+                )?;
             }
 
             let folders: Vec<(String, String)> = folders
@@ -1713,23 +1726,26 @@ pub fn generate(
                 }
             }
             if folder_id.is_none() {
-                let (new_access_token, id) = rbw::actions::create_folder(
+                let (tokens, id) = rbw::actions::create_folder(
                     &access_token,
-                    refresh_token,
+                    &refresh_token,
                     &crate::actions::encrypt(folder_name, None, None)?,
                 )?;
-                if let Some(new_access_token) = new_access_token {
-                    access_token.clone_from(&new_access_token);
-                    db.access_token = Some(new_access_token);
-                    save_db(&db)?;
+                if let Some(tokens) = tokens {
+                    store_refreshed_tokens(
+                        &mut db,
+                        &mut access_token,
+                        &mut refresh_token,
+                        tokens,
+                    )?;
                 }
                 folder_id = Some(id);
             }
         }
 
-        if let (Some(access_token), ()) = rbw::actions::add(
+        if let (Some(tokens), ()) = rbw::actions::add(
             &access_token,
-            refresh_token,
+            &refresh_token,
             &name,
             &rbw::db::EntryData::Login {
                 username,
@@ -1740,8 +1756,12 @@ pub fn generate(
             None,
             folder_id.as_deref(),
         )? {
-            db.access_token = Some(access_token);
-            save_db(&db)?;
+            store_refreshed_tokens(
+                &mut db,
+                &mut access_token,
+                &mut refresh_token,
+                tokens,
+            )?;
         }
 
         crate::actions::sync()?;
@@ -1759,8 +1779,8 @@ pub fn edit(
     unlock()?;
 
     let mut db = load_db()?;
-    let access_token = db.access_token.as_ref().unwrap();
-    let refresh_token = db.refresh_token.as_ref().unwrap();
+    let mut access_token = db.access_token.as_ref().unwrap().clone();
+    let mut refresh_token = db.refresh_token.as_ref().unwrap().clone();
 
     let desc = format!(
         "{}{}",
@@ -1866,9 +1886,9 @@ pub fn edit(
         }
     };
 
-    if let (Some(access_token), ()) = rbw::actions::edit(
-        access_token,
-        refresh_token,
+    if let (Some(tokens), ()) = rbw::actions::edit(
+        &access_token,
+        &refresh_token,
         &entry.id,
         entry.org_id.as_deref(),
         &entry.name,
@@ -1882,8 +1902,12 @@ pub fn edit(
         entry.favorite,
         entry.archived_date.as_deref(),
     )? {
-        db.access_token = Some(access_token);
-        save_db(&db)?;
+        store_refreshed_tokens(
+            &mut db,
+            &mut access_token,
+            &mut refresh_token,
+            tokens,
+        )?;
     }
 
     crate::actions::sync()?;
@@ -1899,8 +1923,8 @@ pub fn remove(
     unlock()?;
 
     let mut db = load_db()?;
-    let access_token = db.access_token.as_ref().unwrap();
-    let refresh_token = db.refresh_token.as_ref().unwrap();
+    let mut access_token = db.access_token.as_ref().unwrap().clone();
+    let mut refresh_token = db.refresh_token.as_ref().unwrap().clone();
 
     let desc = format!(
         "{}{}",
@@ -1911,11 +1935,15 @@ pub fn remove(
     let (entry, _) = find_entry(&db, name, username, folder, ignore_case)
         .with_context(|| format!("couldn't find entry for '{desc}'"))?;
 
-    if let (Some(access_token), ()) =
-        rbw::actions::remove(access_token, refresh_token, &entry.id)?
+    if let (Some(tokens), ()) =
+        rbw::actions::remove(&access_token, &refresh_token, &entry.id)?
     {
-        db.access_token = Some(access_token);
-        save_db(&db)?;
+        store_refreshed_tokens(
+            &mut db,
+            &mut access_token,
+            &mut refresh_token,
+            tokens,
+        )?;
     }
 
     crate::actions::sync()?;
@@ -2833,6 +2861,23 @@ fn load_db() -> anyhow::Result<rbw::db::Db> {
                 .map_err(anyhow::Error::new)
         },
     )
+}
+
+// stores the tokens from a token refresh. the refresh token is only replaced
+// if the server rotated it.
+fn store_refreshed_tokens(
+    db: &mut rbw::db::Db,
+    access_token: &mut String,
+    refresh_token: &mut String,
+    tokens: rbw::actions::RefreshedTokens,
+) -> anyhow::Result<()> {
+    *access_token = tokens.access_token;
+    if let Some(new_refresh_token) = tokens.refresh_token {
+        *refresh_token = new_refresh_token;
+    }
+    db.access_token = Some(access_token.clone());
+    db.refresh_token = Some(refresh_token.clone());
+    save_db(db)
 }
 
 fn save_db(db: &rbw::db::Db) -> anyhow::Result<()> {

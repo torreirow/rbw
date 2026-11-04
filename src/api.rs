@@ -376,6 +376,12 @@ struct ConnectRefreshTokenReq {
 #[derive(serde::Deserialize, Debug)]
 struct ConnectRefreshTokenRes {
     access_token: String,
+    // the official server doesn't rotate refresh tokens, so this is absent
+    // there. vaultwarden can send a new one (e.g. when backed by an sso
+    // identity provider), in which case the old one has been consumed and
+    // must not be used again.
+    #[serde(default)]
+    refresh_token: Option<String>,
 }
 
 #[derive(serde::Serialize, Debug)]
@@ -1562,7 +1568,7 @@ impl Client {
     pub fn exchange_refresh_token(
         &self,
         refresh_token: &str,
-    ) -> Result<String> {
+    ) -> Result<(String, Option<String>)> {
         let connect_req = ConnectRefreshTokenReq {
             grant_type: "refresh_token".to_string(),
             client_id: "cli".to_string(),
@@ -1574,14 +1580,20 @@ impl Client {
             .form(&connect_req)
             .send()
             .map_err(|source| Error::Reqwest { source })?;
+        if !res.status().is_success() {
+            let code = res.status().as_u16();
+            let body =
+                res.text().map_err(|source| Error::Reqwest { source })?;
+            return Err(classify_refresh_token_error(code, &body));
+        }
         let connect_res: ConnectRefreshTokenRes = res.json_with_path()?;
-        Ok(connect_res.access_token)
+        Ok((connect_res.access_token, connect_res.refresh_token))
     }
 
     pub async fn exchange_refresh_token_async(
         &self,
         refresh_token: &str,
-    ) -> Result<String> {
+    ) -> Result<(String, Option<String>)> {
         let connect_req = ConnectRefreshTokenReq {
             grant_type: "refresh_token".to_string(),
             client_id: "cli".to_string(),
@@ -1594,9 +1606,17 @@ impl Client {
             .send()
             .await
             .map_err(|source| Error::Reqwest { source })?;
+        if !res.status().is_success() {
+            let code = res.status().as_u16();
+            let body = res
+                .text()
+                .await
+                .map_err(|source| Error::Reqwest { source })?;
+            return Err(classify_refresh_token_error(code, &body));
+        }
         let connect_res: ConnectRefreshTokenRes =
             res.json_with_path().await?;
-        Ok(connect_res.access_token)
+        Ok((connect_res.access_token, connect_res.refresh_token))
     }
 
     fn api_url(&self, path: &str) -> String {
@@ -1845,6 +1865,22 @@ fn access_token_user_id(access_token: &str) -> Option<String> {
     let payload = crate::base64::decode_url_safe_no_pad(payload).ok()?;
     let claims: Claims = serde_json::from_slice(&payload).ok()?;
     Some(claims.sub)
+}
+
+// unlike during login, `invalid_grant` is unambiguous here: there is no
+// password or second factor involved, so the server can only be rejecting the
+// refresh token itself, and retrying won't help.
+fn classify_refresh_token_error(code: u16, body: &str) -> Error {
+    match body.to_string().json_with_path::<ConnectErrorRes>() {
+        Ok(error_res) if error_res.error == "invalid_grant" => {
+            Error::RefreshTokenInvalid
+        }
+        Ok(error_res) => classify_login_error(&error_res, code),
+        Err(e) => {
+            log::warn!("{e}: {body}");
+            Error::RequestFailed { status: code }
+        }
+    }
 }
 
 fn classify_login_error(error_res: &ConnectErrorRes, code: u16) -> Error {
@@ -2216,5 +2252,115 @@ mod test {
         let json = serde_json::to_value(&req).unwrap();
         assert!(json.as_object().unwrap().get("favorite").is_none());
         assert!(json["archivedDate"].is_null());
+    }
+
+    // serves a single http response, for testing the identity endpoint
+    fn mock_identity_server(status: u16, body: &'static str) -> String {
+        use std::io::{Read as _, Write as _};
+
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = vec![];
+            let mut buf = [0; 4096];
+            // the request body is small, so headers and body arrive together
+            // in practice; just read until the end of the headers
+            while !request.windows(4).any(|w| w == b"\r\n\r\n") {
+                let n = stream.read(&mut buf).unwrap();
+                if n == 0 {
+                    break;
+                }
+                request.extend_from_slice(&buf[..n]);
+            }
+            write!(
+                stream,
+                "HTTP/1.1 {status} X\r\n\
+                 Content-Type: application/json\r\n\
+                 Content-Length: {}\r\n\
+                 Connection: close\r\n\r\n\
+                 {body}",
+                body.len()
+            )
+            .unwrap();
+        });
+        format!("http://{addr}")
+    }
+
+    fn mock_client(status: u16, body: &'static str) -> Client {
+        let url = mock_identity_server(status, body);
+        Client::new("http://127.0.0.1:1", &url, "", None)
+    }
+
+    #[test]
+    fn test_classify_refresh_token_error() {
+        assert!(matches!(
+            classify_refresh_token_error(400, r#"{"error":"invalid_grant"}"#),
+            Error::RefreshTokenInvalid
+        ));
+        assert!(matches!(
+            classify_refresh_token_error(
+                400,
+                r#"{"error":"invalid_client"}"#
+            ),
+            Error::IncorrectApiKey
+        ));
+        assert!(matches!(
+            classify_refresh_token_error(400, r#"{"error":"something"}"#),
+            Error::RequestFailed { status: 400 }
+        ));
+        // e.g. a proxy in front of the server
+        assert!(matches!(
+            classify_refresh_token_error(
+                504,
+                "<html>504 Gateway Time-out</html>"
+            ),
+            Error::RequestFailed { status: 504 }
+        ));
+    }
+
+    // regression test for doy/rbw#362: a rejected refresh token used to
+    // surface as "failed to parse JSON: missing field `access_token`"
+    #[test]
+    fn test_exchange_refresh_token_rejected() {
+        let client = mock_client(400, r#"{"error":"invalid_grant"}"#);
+        assert!(matches!(
+            client.exchange_refresh_token("stale"),
+            Err(Error::RefreshTokenInvalid)
+        ));
+    }
+
+    #[tokio::test]
+    async fn test_exchange_refresh_token_async_rejected() {
+        let client = mock_client(400, r#"{"error":"invalid_grant"}"#);
+        assert!(matches!(
+            client.exchange_refresh_token_async("stale").await,
+            Err(Error::RefreshTokenInvalid)
+        ));
+    }
+
+    #[test]
+    fn test_exchange_refresh_token_without_rotation() {
+        let client = mock_client(200, r#"{"access_token":"new-access"}"#);
+        let (access_token, refresh_token) =
+            client.exchange_refresh_token("current").unwrap();
+        assert_eq!(access_token, "new-access");
+        assert_eq!(refresh_token, None);
+    }
+
+    // doy/rbw#378: a rotated refresh token has to be kept, the old one has
+    // been consumed by the exchange
+    #[tokio::test]
+    async fn test_exchange_refresh_token_with_rotation() {
+        let client = mock_client(
+            200,
+            r#"{"access_token":"new-access","refresh_token":"new-refresh"}"#,
+        );
+        let (access_token, refresh_token) = client
+            .exchange_refresh_token_async("current")
+            .await
+            .unwrap();
+        assert_eq!(access_token, "new-access");
+        assert_eq!(refresh_token.as_deref(), Some("new-refresh"));
     }
 }
