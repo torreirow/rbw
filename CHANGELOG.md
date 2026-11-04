@@ -1,5 +1,18 @@
 # Changelog
 
+## NEXT VERSION
+
+### Fixed
+- **`rbw edit` corrupting entries with an item key** (upstream #364, based on
+  PR #368): entries with an individual encryption key (common for entries
+  created by the web vault or browser extension) were re-encrypted with the
+  user/org key and the item key was dropped from the update request, leaving
+  an entry no client could decrypt (`invalid mac`). Edited fields are now
+  encrypted with the item key and the key is sent back unchanged.
+- **`rbw edit` with empty piped input** (upstream #377): when stdin is not a
+  terminal and the piped contents are empty, `rbw edit` now refuses to save
+  instead of silently clearing the password and notes.
+
 ## [2.0.1] - 2026-11-04
 
 ### Fixed

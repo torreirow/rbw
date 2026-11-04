@@ -1,6 +1,7 @@
 use std::{fmt::Write as _, io::Write as _, os::unix::ffi::OsStrExt as _};
 
 use anyhow::Context as _;
+use is_terminal::IsTerminal as _;
 
 // The default number of seconds the generated TOTP
 // code lasts for before a new one must be generated
@@ -1780,6 +1781,7 @@ pub fn edit(
             }
 
             let contents = rbw::edit::edit(&contents, HELP_PW)?;
+            check_piped_contents(&contents, std::io::stdin().is_terminal())?;
 
             let (password, notes) = parse_editor(&contents);
             let password = password
@@ -1840,6 +1842,7 @@ pub fn edit(
                 |notes| format!("{notes}\n"),
             );
             let contents = rbw::edit::edit(&editor_content, HELP_NOTES)?;
+            check_piped_contents(&contents, std::io::stdin().is_terminal())?;
 
             // prepend blank line to be parsed as pw by `parse_editor`
             let (_, notes) = parse_editor(&format!("\n{contents}\n"));
@@ -2781,6 +2784,22 @@ fn decrypt_cipher(entry: &rbw::db::Entry) -> anyhow::Result<DecryptedCipher> {
     })
 }
 
+// when stdin isn't a terminal, rbw::edit::edit reads the new contents from
+// stdin instead of running an editor. empty input there almost always means
+// that nothing was piped in, not that the entry should be cleared, so refuse
+// to overwrite the existing password and notes with it.
+fn check_piped_contents(
+    contents: &str,
+    stdin_is_terminal: bool,
+) -> anyhow::Result<()> {
+    if !stdin_is_terminal && contents.trim().is_empty() {
+        return Err(anyhow::anyhow!(
+            "refusing to save empty contents read from stdin"
+        ));
+    }
+    Ok(())
+}
+
 fn parse_editor(contents: &str) -> (Option<String>, Option<String>) {
     let mut lines = contents.lines();
 
@@ -2969,6 +2988,21 @@ fn display_field(name: &str, field: Option<&str>, clipboard: bool) -> bool {
 #[cfg(test)]
 mod test {
     use super::*;
+
+    #[test]
+    fn test_check_piped_contents() {
+        // regression test for doy/rbw#377: empty piped input used to wipe
+        // the password and notes
+        assert!(check_piped_contents("", false).is_err());
+        assert!(check_piped_contents("\n", false).is_err());
+        assert!(check_piped_contents(" \n\t\n", false).is_err());
+
+        assert!(check_piped_contents("hunter2\n", false).is_ok());
+        assert!(check_piped_contents("\nsome notes\n", false).is_ok());
+
+        // an editor emptied by hand is a deliberate choice
+        assert!(check_piped_contents("", true).is_ok());
+    }
 
     #[test]
     fn test_find_entry() {
